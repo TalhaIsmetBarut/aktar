@@ -66,8 +66,15 @@ label.c{display:flex;gap:5px;align-items:center}
 
 <div class="card kar">
   <div><span>Net kâr</span><b id="kar">0</b><span id="karNot" style="color:var(--mut);display:block"></span></div>
-  <div style="border-left:2px solid var(--line);padding-left:16px">
-    <span>Kasada Kalan Nakit Para</span><b id="kalanNakitGostergesi" class="pos">0 ₺</b>
+  <div style="border-left:2px solid var(--line);padding-left:16px;flex:1">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+      <span>Kasada Kalan Nakit Para</span>
+      <label class="row" style="gap:5px;font-size:12.5px;color:var(--mut)" title="Güne başlarken kasada bulunan nakit veya önceki gün devri">
+        Kasadaki Başlangıç Nakit:
+        <input id="baslangicNakitInput" type="number" style="width:105px;padding:3px 7px;font-size:13px" placeholder="0" onchange="baslangicNakitDegisti()"> ₺
+      </label>
+    </div>
+    <b id="kalanNakitGostergesi" class="pos">0 ₺</b>
     <span id="kalanNakitAciklama" style="color:var(--mut);display:block;font-size:13px">Bu kadar nakit var</span>
   </div>
 </div>
@@ -164,13 +171,14 @@ label.c{display:flex;gap:5px;align-items:center}
 
 <script>
 const K='gunlukHesap.v1';
-const VARS={ayar:{calisanlar:'Alin, Dabbe, Omi',klasik:2000,medical:2500,gunluk:1000,prim:100,arenGunluk:2000,yol:1000,arenPrim2000:50,arenPrimUstu:100,reklamUcreti:800},gunler:{}};
+const VARS={ayar:{calisanlar:'Alin, Dabbe, Omi',klasik:2000,medical:2500,gunluk:1000,prim:100,arenGunluk:2000,yol:1000,arenPrim2000:50,arenPrimUstu:100,reklamUcreti:800,varsayilanNakit:0},gunler:{}};
 let S;
 try{S=JSON.parse(localStorage.getItem(K))||VARS}catch(e){S=VARS}
 S.ayar=Object.assign({},VARS.ayar,S.ayar);
 if(S.ayar.arenPrim2000 === undefined) S.ayar.arenPrim2000 = 50;
 if(S.ayar.arenPrimUstu === undefined) S.ayar.arenPrimUstu = 100;
 if(S.ayar.reklamUcreti === undefined) S.ayar.reklamUcreti = 800;
+if(S.ayar.varsayilanNakit === undefined) S.ayar.varsayilanNakit = 0;
 delete S.ayar.arenTabanPrim;
 delete S.ayar.arenEkstra2000;
 delete S.ayar.arenEkstraUstu;
@@ -181,6 +189,19 @@ const kaydet=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
 const calisanlar=()=>S.ayar.calisanlar.split(',').map(s=>s.trim()).filter(Boolean);
 const gun=()=>$('gun').value;
 const veri=(g=gun())=>S.gunler[g]||(S.gunler[g]={m:[],x:[],k:[]});
+
+function baslangicNakitDegisti(){
+  const el=$('baslangicNakitInput');
+  if(!el)return;
+  const val=el.value.trim();
+  const d=veri();
+  if(val===''||isNaN(val)){
+    delete d.baslangicNakit;
+  }else{
+    d.baslangicNakit=+val;
+  }
+  kaydet();ciz();
+}
 
 function arenPrim(m){
   if(m.reklam) return 0;
@@ -196,10 +217,11 @@ function arenPrim(m){
 function hesapla(d){
   const cs=calisanlar(),A=S.ayar;
   d.k = d.k || [];
+  d.calisanlarCalisti = d.calisanlarCalisti || {};
   const mSayisi=d?.m?.length||0,xSayisi=d?.x?.length||0,kSayisi=d?.k?.length||0;
   if(!mSayisi&&!xSayisi&&!kSayisi){
     return{ciro:0,nakit:0,kart:0,kartSadece:0,havale:0,reklamSayisi:0,reklamGideri:0,
-      kadin:cs.map(c=>({ad:c,n:0,tutar:0,brut:0,kesinti:0,ms:[],reklam:0,reklamsiz:0,klasik:0,medical:0,ciro:0})),
+      kadin:cs.map(c=>({ad:c,n:0,tutar:0,brut:0,kesinti:0,calisti:false,ms:[],reklam:0,reklamsiz:0,klasik:0,medical:0,ciro:0})),
       kadinTop:0,arenPrimTop:0,aren:0,arenBrut:0,arenKesinti:0,masraf:0,gider:0,kar:0};
   }
   const ciro=d.m.reduce((t,m)=>t+m.fiyat,0);
@@ -217,9 +239,11 @@ function hesapla(d){
     const top=f=>ms.filter(f).reduce((t,m)=>t+m.fiyat,0);
     const say=f=>ms.filter(f).length;
     const kesinti=d.k.filter(x=>x.calisan===c).reduce((t,x)=>t+x.tutar,0);
-    const brut=mSayisi>0?(+A.gunluk+n*A.prim):0;
-    const tutar=Math.max(0, brut - kesinti);
-    return{ad:c,n,brut,kesinti,tutar,ms,
+    // Çalışan o gün müşteri aldıysa (n > 0) veya bugün salondaydı olarak işaretlendiyse yevmiye alır:
+    const calisti = (n > 0) || Boolean(d.calisanlarCalisti && d.calisanlarCalisti[c]);
+    const brut = calisti ? (+A.gunluk + n * A.prim) : 0;
+    const tutar = Math.max(0, brut - kesinti);
+    return{ad:c,n,brut,kesinti,tutar,ms,calisti,
       reklam:say(m=>m.reklam),reklamsiz:say(m=>!m.reklam),
       klasik:say(m=>m.tur==='Klasik'),medical:say(m=>m.tur==='Medical'),
       ciro:top(()=>true)};
@@ -234,6 +258,13 @@ function hesapla(d){
   // Toplam Ödemeler: Çalışanlar + Aren + Masraflar + Reklam Kesintisi
   const gider=kadinTop+aren+masraf+reklamGideri;
   return{ciro,nakit,kart,kartSadece,havale,reklamSayisi,reklamGideri,kadin,kadinTop,arenPrimTop,aren,arenBrut,arenKesinti,masraf,gider,kar:ciro-gider};
+}
+
+function calisanCalismaDegistir(ad, calisti){
+  const d=veri();
+  d.calisanlarCalisti=d.calisanlarCalisti||{};
+  d.calisanlarCalisti[ad]=calisti;
+  kaydet();ciz();
 }
 
 function primKesintiEkle(){
@@ -283,24 +314,43 @@ function ciz(){
   const toplamBanka=res?res.toplamBankaKasa:(h.kartSadece+netHavale);
   const toplamNakit=res?res.toplamNakitKasa:h.nakit;
 
-  // Kasada kalan nakit göstergesi (Elde bu kadar nakit var)
-  $('kalanNakitGostergesi').textContent=tl(toplamNakit);
-  $('kalanNakitAciklama').textContent=`Kasada şu an bu kadar nakit var (${tl(toplamNakit)})`;
+  const bInput=$('baslangicNakitInput');
+  if(bInput && document.activeElement !== bInput){
+    bInput.value = (d.baslangicNakit !== undefined && d.baslangicNakit !== null) ? d.baslangicNakit : (res ? res.oncekiNakit : (+S.ayar.varsayilanNakit || 0));
+  }
+
+  // Kasada kalan nakit göstergesi
+  if(toplamNakit >= 0){
+    $('kalanNakitGostergesi').textContent=tl(toplamNakit);
+    $('kalanNakitGostergesi').className='pos';
+    $('kalanNakitAciklama').innerHTML=`Kasada şu an <b>${tl(toplamNakit)}</b> fiziki nakit var. <small style="color:var(--mut)">(Başlangıç: ${tl(res?res.oncekiNakit:0)}, Günlük Net: ${tl(res?res.kalanNakit:0)})</small>`;
+  } else {
+    $('kalanNakitGostergesi').textContent=tl(toplamNakit);
+    $('kalanNakitGostergesi').className='neg';
+    $('kalanNakitAciklama').innerHTML=`<span style="color:var(--neg);font-weight:600">Nakit Açığı: ${tl(Math.abs(toplamNakit))}</span> (Başlangıç: ${tl(res?res.oncekiNakit:0)}, Giren: ${tl(h.nakit)}, Yapılan nakit ödeme: ${tl(h.kadinTop+h.aren+h.masraf)})`;
+  }
+
+  let arenOzetParcalar = [`${tl(S.ayar.arenGunluk)}`, `${tl(S.ayar.yol)} yol`];
+  if(h.arenPrimTop > 0) arenOzetParcalar.push(`${tl(h.arenPrimTop)} prim`);
+  let arenOzetMetin = arenOzetParcalar.join(' + ');
+  if(h.arenKesinti > 0) arenOzetMetin += ` − ${tl(h.arenKesinti)} kesinti`;
 
   $('ozet').innerHTML=c('Toplam Ciro',tl(h.ciro))
     +c('Toplam Nakit Kasası',`${tl(toplamNakit)}<small>Bugün Nakit Giriş: ${tl(h.nakit)}</small>`)
     +c('Toplam Banka Kasası',`${tl(toplamBanka)}<small>Kredi Kartı ${tl(res?res.toplamKkKasa:h.kartSadece)} + Havale ${tl(res?res.toplamHavaleKasa:netHavale)}</small>`)
     +(h.reklamGideri>0?c('Reklam Kesintisi',`${tl(h.reklamGideri)}<small>${h.reklamSayisi} müşteri × 800 ₺</small>`):'')
-    +c("Aren'in Hakedişi",`${tl(h.aren)}<small>${tl(S.ayar.arenGunluk)} + ${tl(S.ayar.yol)} yol + ${tl(h.arenPrimTop)} prim${h.arenKesinti>0?' (-'+tl(h.arenKesinti)+')':''}</small>`)
+    +c("Aren'in Hakedişi",`${tl(h.aren)}<small>${arenOzetMetin}</small>`)
     +c('Masraflar',tl(h.masraf));
-  $('calisanOzet').innerHTML=h.kadin.map(k=>`<div><details class="cal"><summary><small style="display:inline">${esc(k.ad)} (${k.n} müşteri)</small><br>${tl(k.tutar)}</summary>
+  $('calisanOzet').innerHTML=h.kadin.map(k=>`<div><details class="cal" ${k.n>0||k.calisti?'open':''}><summary><small style="display:inline">${esc(k.ad)} (${k.n} müşteri)</small><br>${tl(k.tutar)}</summary>
       <table class="dt">
-        <tr><td>Günlük</td><td class="n">${tl(k.brut > 0 ? S.ayar.gunluk : 0)}</td></tr>
+        <tr><td>Günlük</td><td class="n">${tl(k.calisti ? S.ayar.gunluk : 0)}</td></tr>
         <tr><td>Prim (${k.n} × ${tl(S.ayar.prim)})</td><td class="n">${tl(k.n*S.ayar.prim)}</td></tr>
         ${k.kesinti>0?`<tr><td style="color:var(--neg)">Primden Düşülen</td><td class="n neg">−${tl(k.kesinti)}</td></tr>`:''}
         <tr><td>Klasik / Medical</td><td class="n">${k.klasik} / ${k.medical}</td></tr>
         <tr><td><b>Getirdiği ciro</b></td><td class="n"><b>${tl(k.ciro)}</b></td></tr>
-      </table></details></div>`).join('');
+      </table>
+      ${k.n===0?`<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--line)"><label style="font-size:12px;cursor:pointer"><input type="checkbox" onchange="calisanCalismaDegistir('${esc(k.ad)}', this.checked)" ${k.calisti?'checked':''}> Bugün salondaydı (${tl(S.ayar.gunluk)} ver)</label></div>`:''}
+      </details></div>`).join('');
   $('masraflar').innerHTML=d.x.map((x,i)=>`<tr><td>${esc(x.ad)}</td><td class="n">${tl(x.tutar)}</td><td><button class="g" onclick="masrafSil(${i})">Sil</button></td></tr>`).join('');
   
   // Prim kesintileri ve personel listesi
@@ -380,26 +430,26 @@ function devirliHesapListesi(sonTarih=gun(),nGun=1){
   const gl=[];
   for(let i=nGun-1;i>=0;i--)gl.push(gunGeri(sonTarih,i));
   const ilkG=gl[0];
-  const oncekiKayitlar=Object.keys(S.gunler).filter(k=>k<ilkG&&(S.gunler[k].m?.length||S.gunler[k].x?.length)).sort();
-  let devir={havaleKasa:0,kkKasa:0,nakitKasa:0};
+  const oncekiKayitlar=Object.keys(S.gunler).filter(k=>k<ilkG&&(S.gunler[k].m?.length||S.gunler[k].x?.length||S.gunler[k].k?.length||S.gunler[k].baslangicNakit!==undefined)).sort();
+  let devir={havaleKasa:0,kkKasa:0,nakitKasa:+S.ayar.varsayilanNakit||0};
   oncekiKayitlar.forEach(k=>{
     const d=S.gunler[k],h=hesapla(d);
-    const hasData=(d.m?.length||0)>0||(d.x?.length||0)>0;
+    const hasData=(d.m?.length||0)>0||(d.x?.length||0)>0||(d.k?.length||0)>0||(d.baslangicNakit!==undefined);
     if(!hasData)return;
     const gunlukHavale=h.havale-h.reklamGideri;
     const gunlukKk=h.kartSadece;
     const toplamHavale=devir.havaleKasa+gunlukHavale;
     const toplamKk=devir.kkKasa+gunlukKk;
     const toplamPersonel=h.kadinTop+h.aren;
-    const toplamYol=d.m?.length?+S.ayar.yol:0;
-    const kalanNakit=h.nakit-(toplamPersonel+toplamYol+h.masraf);
-    const toplamNakit=devir.nakitKasa+(kalanNakit+toplamYol);
+    const oncekiNakit=(d.baslangicNakit!==undefined&&d.baslangicNakit!==null&&d.baslangicNakit!=='')?+d.baslangicNakit:devir.nakitKasa;
+    const kalanNakit=h.nakit-(toplamPersonel+h.masraf);
+    const toplamNakit=oncekiNakit+kalanNakit;
     devir={havaleKasa:toplamHavale,kkKasa:toplamKk,nakitKasa:toplamNakit};
   });
   const sonuclar=[];
   gl.forEach(g=>{
-    const d=S.gunler[g]||{m:[],x:[]};
-    const hasData=(d.m?.length||0)>0||(d.x?.length||0)>0;
+    const d=S.gunler[g]||{m:[],x:[],k:[]};
+    const hasData=(d.m?.length||0)>0||(d.x?.length||0)>0||(d.k?.length||0)>0||(d.baslangicNakit!==undefined);
     const h=hesapla(d);
     const oncekiHavale=devir.havaleKasa;
     const gunlukHavaleKasa=hasData?(h.havale-h.reklamGideri):0;
@@ -412,9 +462,9 @@ function devirliHesapListesi(sonTarih=gun(),nGun=1){
     const toplamPersonel=h.kadinTop+h.aren;
     const toplamYol=(hasData&&d.m.length>0)?+S.ayar.yol:0;
     const masraf=h.masraf;
-    const kalanNakit=hasData?(h.nakit-(toplamPersonel+toplamYol+masraf)):0;
-    const oncekiNakit=devir.nakitKasa;
-    const toplamNakitKasa=oncekiNakit+(hasData?(kalanNakit+toplamYol):0);
+    const oncekiNakit=(d.baslangicNakit!==undefined&&d.baslangicNakit!==null&&d.baslangicNakit!=='')?+d.baslangicNakit:devir.nakitKasa;
+    const kalanNakit=hasData?(h.nakit-(toplamPersonel+masraf)):0;
+    const toplamNakitKasa=oncekiNakit+(hasData?kalanNakit:0);
     const netKar=hasData?(toplamBankaKasa+toplamNakitKasa):0;
     const res={g,hasData,oncekiHavale,gunlukHavale:h.havale,gunlukHavaleKasa,toplamHavaleKasa,oncekiKk,gunlukKk,toplamKkKasa,toplamBankaKasa,gelenKisi,ciro,gunlukNakit,aren:h.aren,kadin:h.kadin,toplamPersonel,toplamYol,masraf,kalanNakit,oncekiNakit,toplamNakitKasa,netKar,d,h};
     sonuclar.push(res);
@@ -443,14 +493,29 @@ function excelRaporCiz(){
   if(res.h.reklamGideri>0||res.hasData){
     html+=tr(`REKLAM KESİNTİSİ (${res.h.reklamSayisi} müşteri × ${tl(S.ayar.reklamUcreti)})`,tl(res.h.reklamGideri));
   }
-  const arenMetin = res.aren > 0 ? `${tl(S.ayar.arenGunluk)} + ${tl(S.ayar.yol)} + ${tl(res.h.arenPrimTop)} = <b>${tl(res.aren)}</b>` : tl(0);
+  let arenMetin = tl(0);
+  if(res.aren > 0 || res.h.arenBrut > 0){
+    let f = `${tl(S.ayar.arenGunluk)} + ${tl(S.ayar.yol)} yol`;
+    if(res.h.arenPrimTop > 0) f += ` + ${tl(res.h.arenPrimTop)} prim`;
+    if(res.h.arenKesinti > 0) f += ` − <span style="color:var(--neg)">${tl(res.h.arenKesinti)} kesinti</span>`;
+    arenMetin = `${f} = <b>${tl(res.aren)}</b>`;
+  }
   html+=tr('AREN', arenMetin);
+
   res.kadin.forEach(k=>{
-    const kadinMetin = k.tutar > 0 ? `${tl(S.ayar.gunluk)} + ${tl(k.n*S.ayar.prim)} = <b>${tl(k.tutar)}</b>` : tl(0);
+    let kadinMetin = tl(0);
+    if(k.tutar > 0 || k.brut > 0){
+      let f = '';
+      const yevmiye = k.calisti ? +S.ayar.gunluk : 0;
+      if(yevmiye > 0) f += `${tl(yevmiye)}`;
+      if(k.n * S.ayar.prim > 0) f += (f ? ' + ' : '') + `${tl(k.n * S.ayar.prim)} prim`;
+      if(k.kesinti > 0) f += ` − <span style="color:var(--neg)">${tl(k.kesinti)} kesinti</span>`;
+      kadinMetin = `${f} = <b>${tl(k.tutar)}</b>`;
+    }
     html+=tr(esc(k.ad.toUpperCase()), kadinMetin);
   });
   html+=tr('TOPLAM PERSONEL HAKEDİŞİ',tl(res.toplamPersonel),'vurgu');
-  html+=tr('TOPLAM YOL PARASI',tl(res.toplamYol));
+  html+=tr('TOPLAM YOL PARASI',`${tl(res.toplamYol)} <small style="color:var(--mut)">(Aren hakedişine dahildir)</small>`);
   const masrafDetay=res.d.x.length?res.d.x.map(x=>`${esc(x.ad)} (${tl(x.tutar)})`).join(', '):'';
   html+=tr('MASRAF',`${tl(res.masraf)} <small style="color:var(--mut)">${masrafDetay}</small>`);
   html+=tr('KALAN NAKİT',tl(res.kalanNakit));
@@ -472,9 +537,10 @@ function ayarCiz(){
     ['yol','Aren yol parası'],
     ['arenPrim2000','Aren prim (2000 ₺)'],
     ['arenPrimUstu','Aren prim (>2000 ₺)'],
-    ['reklamUcreti','Reklam kesintisi (müşteri başı)']
+    ['reklamUcreti','Reklam kesintisi (müşteri başı)'],
+    ['varsayilanNakit','Varsayılan Başlangıç Nakit Kasası (₺)']
   ];
-  $('ayar').innerHTML=al.map(([k,t])=>`<label>${t}<br><input data-k="${k}" value="${esc(A[k]??'')}" ${k==='calisanlar'?'size="22"':'type="number" style="width:100px"'}></label>`).join('');
+  $('ayar').innerHTML=al.map(([k,t])=>`<label>${t}<br><input data-k="${k}" value="${esc(A[k]??'')}" ${k==='calisanlar'?'size="22"':'type="number" style="width:120px"'}></label>`).join('');
   $('ayar').querySelectorAll('input').forEach(i=>i.onchange=()=>{const k=i.dataset.k;S.ayar[k]=k==='calisanlar'?i.value:+i.value;kaydet();fiyatVarsayilan();ciz()});
 }
 
@@ -568,7 +634,7 @@ function gunSatirlari(g){
     r.push(["Aren Hakedişi", {v:res.aren, s:'Money'}]);
     res.kadin.forEach(k=>r.push([`${k.ad} Hakediş`, {v:k.tutar, s:'Money'}, `${k.n} müşteri`]));
     r.push(['TOPLAM PERSONEL HAKEDİŞİ', {v:res.toplamPersonel, s:'MoneyBold'}]);
-    r.push(['Toplam Yol Parası', {v:res.toplamYol, s:'Money'}]);
+    r.push(['Toplam Yol Parası (Aren içinde)', {v:res.toplamYol, s:'Money'}]);
     r.push(['Masraflar', {v:res.masraf, s:'Money'}]);
     r.push(['KALAN NAKİT', {v:res.kalanNakit, s:'MoneyBold'}]);
     r.push(['Önceki Gün Nakit Kasa', {v:res.oncekiNakit, s:'Money'}]);
@@ -614,7 +680,7 @@ function birlesikSatirlari(){
       son:sonuclar.reduce((t,r)=>t+(r.kadin[ci]?r.kadin[ci].tutar:0),0)
     })),
     {l:'TOPLAM PERSONEL HAKEDİŞİ', f:r=>r.toplamPersonel, son:sonuclar.reduce((t,r)=>t+r.toplamPersonel,0), s:'MoneyBold'},
-    {l:'TOPLAM YOL PARASI', f:r=>r.toplamYol, son:sonuclar.reduce((t,r)=>t+r.toplamYol,0)},
+    {l:'TOPLAM YOL PARASI (Aren içinde)', f:r=>r.toplamYol, son:sonuclar.reduce((t,r)=>t+r.toplamYol,0)},
     {l:'MASRAFLAR', f:r=>r.masraf, son:sonuclar.reduce((t,r)=>t+r.masraf,0)},
     {l:'KALAN NAKİT', f:r=>r.kalanNakit, son:sonuclar.reduce((t,r)=>t+r.kalanNakit,0)},
     {l:'ÖNCEKİ GÜN NAKİT KASA', f:r=>r.oncekiNakit, son:sonRes.oncekiNakit},
@@ -710,7 +776,7 @@ function birlesikCiz(){
       son:tl(sonuclar.reduce((t,r)=>t+(r.kadin[ci]?r.kadin[ci].tutar:0),0))
     })),
     {l:'TOPLAM PERSONEL HAKEDİŞİ', f:r=>tl(r.toplamPersonel), son:tl(sonuclar.reduce((t,r)=>t+r.toplamPersonel,0)), cls:'vurgu'},
-    {l:'TOPLAM YOL PARASI', f:r=>tl(r.toplamYol), son:tl(sonuclar.reduce((t,r)=>t+r.toplamYol,0))},
+    {l:'TOPLAM YOL PARASI (Aren içinde)', f:r=>tl(r.toplamYol), son:tl(sonuclar.reduce((t,r)=>t+r.toplamYol,0))},
     {l:'MASRAFLAR', f:r=>tl(r.masraf), son:tl(sonuclar.reduce((t,r)=>t+r.masraf,0))},
     {l:'KALAN NAKİT', f:r=>tl(r.kalanNakit), son:tl(sonuclar.reduce((t,r)=>t+r.kalanNakit,0))},
     {l:'ÖNCEKİ GÜN NAKİT KASA', f:r=>tl(r.oncekiNakit), son:tl(sonRes.oncekiNakit)},
